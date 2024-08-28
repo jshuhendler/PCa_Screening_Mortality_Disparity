@@ -1,0 +1,87 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2576
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;\red41\green101\blue168;\red255\green255\blue255;\red38\green38\blue38;
+\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c20000\c47843\c71765;\cssrgb\c100000\c100000\c100000;\cssrgb\c20000\c20000\c20000;
+\cssrgb\c0\c1\c1;}
+\margl1440\margr1440\vieww19440\viewh11040\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 Data / Files used:\
+\
+1. Screening Data by MMSA (cabs):\
+\
+https://data.cdc.gov/Behavioral-Risk-Factors/Behavioral-Risk-Factors-Selected-Metropolitan-Area/j32a-sa6u/explore/query/SELECT%0A%20%20%60year%60%2C%0A%20%20%60locationabbr%60%2C%0A%20%20%60locationdesc%60%2C%0A%20%20%60class%60%2C%0A%20%20%60topic%60%2C%0A%20%20%60question%60%2C%0A%20%20%60response%60%2C%0A%20%20%60break_out%60%2C%0A%20%20%60break_out_category%60%2C%0A%20%20%60sample_size%60%2C%0A%20%20%60data_value%60%2C%0A%20%20%60confidence_limit_low%60%2C%0A%20%20%60confidence_limit_high%60%2C%0A%20%20%60display_order%60%2C%0A%20%20%60data_value_unit%60%2C%0A%20%20%60data_value_type%60%2C%0A%20%20%60data_value_footnote_symbol%60%2C%0A%20%20%60data_value_footnote%60%2C%0A%20%20%60datasource%60%2C%0A%20%20%60classid%60%2C%0A%20%20%60topicid%60%2C%0A%20%20%60locationid%60%2C%0A%20%20%60breakoutid%60%2C%0A%20%20%60breakoutcategoryid%60%2C%0A%20%20%60questionid%60%2C%0A%20%20%60responseid%60%2C%0A%20%20%60geolocation%60%0AORDER%20BY%0A%20%20%60year%60%20DESC%20NULL%20FIRST%2C%0A%20%20%60locationabbr%60%20ASC%20NULL%20LAST%2C%0A%20%20%60class%60%20ASC%20NULL%20LAST%2C%0A%20%20%60topic%60%20ASC%20NULL%20LAST%2C%0A%20%20%60question%60%20ASC%20NULL%20LAST%2C%0A%20%20%60response%60%20ASC%20NULL%20LAST%0ASEARCH%20%22psa%22/page/filter\
+\
+- Downloaded as: Behavioral_Risk_Factors__Selected_Metropolitan_Area_Risk_Trends__SMART__MMSA_Prevalence_Data__2011_to_Present__20240711.csv\
+\
+2. PCa Mortality Data by County (fips):\
+\
+From SEER STAT\
+\
+- Downloaded as:\
+\
+3. Crosswalk (cabs to fips):\
+\
+https://data.nber.org/cbsa-msa-fips-ssa-county-crosswalk/combined/\
+\
+- Downloaded as:\
+cbsatocountycrosswalk.csv\
+\
+4. Poverty Data by county (fips) - men under poverty:\
+\
+https://statecancerprofiles.cancer.gov/demographics/index.php\
+\
+- Downloaded as:\
+census.csv , census.csv\
+- Renamed to \'93blackcensus.csv\'94 and \'93whitecensus.csv\'94 for differentiation between black and white data\
+\
+5. County Census Population Data\
+\
+\pard\pardeftab720\sa200\partightenfactor0
+{\field{\*\fldinst{HYPERLINK "https://www2.census.gov/programs-surveys/popest/datasets/2010-2019/counties/totals/co-est2019-alldata.csv"}}{\fldrslt \cf2 \cb3 \expnd0\expndtw0\kerning0
+https://www2.census.gov/programs-surveys/popest/datasets/2010-2019/counties/totals/co-est2019-alldata.csv}}\cf4 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720\partightenfactor0
+\cf5 \cb3 - Downloaded as:\
+\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf5 co-est2019-alldata.csv\cb1 \kerning1\expnd0\expndtw0 \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf0 \
+6. Rural-Urban Continuum Codes\
+https://www.ers.usda.gov/data-products/rural-urban-continuum-codes/\
+\
+- Downloaded as: ruralurbancodes2013.xls\
+- converted to: ruralurbancodes2013.csv\
+\
+7. SVI\
+\
+https://www.atsdr.cdc.gov/placeandhealth/svi/interactive_map.html\
+ \
+- Downloaded as: \
+svi_interactive_map.csv\
+\
+- data dictionary\
+https://www.atsdr.cdc.gov/placeandhealth/svi/documentation/pdf/SVI-2022-Documentation-H.pdf#page=7\
+\
+-Chosen variables : EP_POV150, EP_UNEMP, EP_NOHSDP, EP_UNINSUR. Also created groupings for each of these variables 1 if I think it would increase disparity and 0 if decrease\
+\
+8. For % black/white population\'85\
+\
+https://statecancerprofiles.cancer.gov/map/map.withimage.php?00&county&001&00022&00&0&3&0&1&5&0#results\
+\
+-downloaded as census (2).csv renamed to black_population.csv\
+\
+-downloaded as census (2).csv renamed to white_population.csv\
+\
+9. For pre psa testing comparison \
+\
+Downloaded from seer stat 1969 - 1986 data\
+-1969-1986.csv\
+ \
+\
+\
+\
+\
+}

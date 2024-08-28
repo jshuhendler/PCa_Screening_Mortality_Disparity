@@ -1,0 +1,327 @@
+---
+title: "PCa_final"
+author: "Jonathan Shuhendler"
+date: "2024-08-28"
+output: html_document
+---
+
+Load Libraries
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+
+# Load Libraries
+library(tidyverse)
+library(magrittr)
+library(usmap)
+library(sf)
+library(cowplot)
+library(biscale)
+library(ggplot2)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(ggiraphExtra)
+library(gt)
+library(gtsummary)
+```
+
+Clean / Prep Data
+
+```{r}
+# Clean / Prep Data
+# 2014 - 2022 SEER and calculated ratio 
+# Step 1: Read the CSV file
+seer <- read.csv("PCa_Mortality_2014_2022.csv", skip = 3)
+colnames(seer) <- c("fips", "white_rate", "white_count", "white_pop", "black_rate", "black_count", "black_pop")
+seer$fips <- str_extract(seer$fips, "\\d{5}")
+seer$white_rate <- as.numeric(seer$white_rate)
+seer$black_rate <- as.numeric(seer$black_rate)
+seer$mort_ratio <- seer$black_rate / seer$white_rate
+seer[seer == "^"] <- NA
+seer <- na.omit(seer)
+
+# Screening - BRFSS
+brfss <- read.csv("Behavioral_Risk_Factors__Selected_Metropolitan_Area_Risk_Trends__SMART__MMSA_Prevalence_Data__2011_to_Present__20240711.csv") %>%
+  group_by(Locationabbr) %>%
+  summarize(
+    Screening_Sample_Size = sum(Sample_Size, na.rm = TRUE),
+    average_screening_unweighted = mean(Data_value[Response == "Yes"], na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  rename(cbsa = Locationabbr)
+
+# Poverty 
+white <- read.csv("whitecensus.csv", skip = 6) %>%
+  magrittr::set_colnames(c("County", "fips", "Percent_Below_Poverty_white", 
+                           "People_Below_Poverty_white", "Rank_within_US_white"))
+
+black <- read.csv("blackcensus.csv", skip = 6) %>%
+  magrittr::set_colnames(c("County", "fips", "Percent_Below_Poverty_black", 
+                           "People_Below_Poverty_black", "Rank_within_US_black"))
+
+poverty_by_race <- full_join(white, black, by = "fips") %>%
+  mutate(
+    Percent_Below_Poverty_white = as.numeric(Percent_Below_Poverty_white),
+    Percent_Below_Poverty_black = as.numeric(Percent_Below_Poverty_black),
+    fips = as.character(fips),
+    black_white_poverty_ratio = Percent_Below_Poverty_black / Percent_Below_Poverty_white
+  ) %>%
+  select(fips, Percent_Below_Poverty_white, Percent_Below_Poverty_black, People_Below_Poverty_black, People_Below_Poverty_white, black_white_poverty_ratio) %>%
+  drop_na()
+
+# County Size (Population) 
+total_population <- read.csv("co-est2019-alldata.csv") %>%
+  mutate(
+    STATE = str_pad(STATE, width = 2, pad = "0"),
+    COUNTY = str_pad(COUNTY, width = 3, pad = "0"),
+    fips = paste0(STATE, COUNTY)
+  ) %>%
+  select(fips, POPESTIMATE2019) 
+
+# SVI Variables = x4
+svi <- read.csv("svi_selection.csv") %>%
+  mutate(fips = str_pad(as.character(FIPS), width = 5, pad = "0")) %>%
+  select(fips, EP_POV150, EP_UNEMP, EP_NOHSDP, EP_UNINSUR)
+
+# Population - Percent White = x5
+white_population <- read.csv("white_population.csv", skip = 6) %>%
+  select(2, 3)
+white_population$fips <- as.character(white_population$fips)
+
+# Screening + Seer via Crosswalk
+crosswalk <- read.csv("cbsatocountycrosswalk.csv") %>%
+  select(fipscounty, cbsa) %>%
+  mutate(fipscounty = str_pad(fipscounty, width = 5, pad = "0")) %>%
+  rename(fips = fipscounty) %>%
+  drop_na()
+
+seer_brfss <- left_join(brfss, crosswalk, by = "cbsa")
+seer_brfss <- left_join(seer, seer_brfss, by = "fips")
+seer_brfss$average_screening_unweighted <- seer_brfss$average_screening_unweighted / 10
+seer_brfss <- drop_na(seer_brfss)
+
+# Add Poverty Population Size SVI and %White
+df <- left_join(seer_brfss, poverty_by_race, by = "fips") %>%
+  left_join(total_population, by = "fips") %>% 
+  left_join(poverty_by_race, by = "fips") %>%
+  left_join(total_population, by = "fips") %>% 
+  left_join(white_population, by = "fips") %>%
+  left_join(svi, by = "fips") 
+colnames(df)[23] <- "percent_white"
+
+df$POPESTIMATE2019.x <- as.numeric(df$POPESTIMATE2019.x) / 10000 
+df <- na.omit(df)
+
+# Create quantiles for some variables - Facet wrap by population 
+df$population_group <- ntile(df$POPESTIMATE2019.x, 4)
+df$population_group <- factor(df$population_group, labels = c("Q1", "Q2", "Q3", "Q4"))
+
+# Group by percent white
+df$percent_group <- ntile(df$percent_white, 4)
+df$percent_group <- factor(df$percent_group, labels = c("Q1(Least White)", "Q2", "Q3", "Q4(Most White)"))
+
+# Group by Poverty Ratio
+df$poverty_group <- ntile(df$black_white_poverty_ratio.x, 4)
+df$poverty_group <- factor(df$poverty_group, labels = c("Q1", "Q2", "Q3", "Q4"))
+
+# Group by Unemployment
+df$unemployment_group <- ntile(df$EP_UNEMP, 4)
+df$unemployment_group <- factor(df$unemployment_group, labels = c("Q1", "Q2", "Q3", "Q4"))
+
+# Making Binary Variables for Interaction Terms
+# 1 = higher white population % , 0 = lower white population %
+df <- mutate(df, white_group_bin = ntile(percent_white, 2))
+df$white_group_bin <- ifelse(df$white_group_bin == 2, 1, 
+                                ifelse(df$white_group_bin == 1, 0, NA))
+
+# 0 = lower poverty disparity , 1 = higher poverty disparity
+df <- mutate(df, poverty_group_bin = ntile(black_white_poverty_ratio.x, 2))
+df$poverty_group_bin <- ifelse(df$poverty_group_bin == 2, 1, 
+                                  ifelse(df$poverty_group_bin == 1, 0, NA))
+
+# 0 = lower screening rate , 1 = higher screening rate
+df <- mutate(df, average_screening_bin = ntile(average_screening_unweighted, 2))
+df$average_screening_bin <- ifelse(df$average_screening_bin == 2, 1, 
+                                            ifelse(df$average_screening_bin == 1, 0, NA))
+
+# 0 is lower poverty, unemployment, education, no insurance , 1 is higher ...
+df <- df %>%
+  mutate(
+    EP_POV150_bin = ifelse(ntile(EP_POV150, 2) == 2, 1, 0),
+    EP_UNEMP_bin = ifelse(ntile(EP_UNEMP, 2) == 2, 1, 0),
+    EP_NOHSDP_bin = ifelse(ntile(EP_NOHSDP, 2) == 2, 1, 0),
+    EP_UNINSUR_bin = ifelse(ntile(EP_UNINSUR, 2) == 2, 1, 0)
+  )
+
+# Data For Comparing Timeframes: 1984 - 1989 vs 2014 - 2022
+# Clean data
+pre_psa <- read.csv("1984-1989.csv", skip = 1) %>%
+  magrittr::set_colnames(c("fips", "white_rate_pre", "white_count_pre", "white_pop_pre", "black_rate_pre", "black_count_pre", "black_pop_pre")) %>%
+  mutate(fips = str_extract(fips, "\\d{5}")) %>%
+  mutate(
+    white_rate_pre = as.numeric(white_rate_pre),
+    black_rate_pre = as.numeric(black_rate_pre),
+    mort_ratio_pre = black_rate_pre / white_rate_pre
+  ) %>%
+  mutate(across(where(is.character), ~na_if(., "^"))) %>%
+  drop_na()
+
+post_psa <- read.csv("PCa_Mortality_2014_2022.csv", skip = 3) %>%
+  magrittr::set_colnames(c("fips", "white_rate_post", "white_count_post", "white_pop_post", "black_rate_post", "black_count_post", "black_pop_post")) %>%
+  mutate(fips = str_extract(fips, "\\d{5}")) %>%
+  mutate(
+    white_rate_post = as.numeric(white_rate_post),
+    black_rate_post = as.numeric(black_rate_post),
+    mort_ratio_post = black_rate_post / white_rate_post
+  ) %>%
+  mutate(across(where(is.character), ~na_if(., "^"))) %>%
+  drop_na()
+
+compare <- full_join(post_psa, pre_psa) %>%
+  drop_na()
+scr <- df %>%
+  select(average_screening_unweighted, fips)
+compare <- full_join(scr,compare) %>%
+  drop_na()
+
+compare <- compare %>%
+  mutate(
+    white_count_post = parse_number(white_count_post),
+    black_count_post = parse_number(black_count_post),
+    white_count_pre = parse_number(white_count_pre),
+    black_count_pre = parse_number(black_count_pre),
+    white_pop_post = parse_number(white_pop_post),
+    white_pop_pre = parse_number(white_pop_pre),
+    black_pop_post = parse_number(black_pop_post),
+    black_pop_pre = parse_number(black_pop_pre)
+  )
+```
+
+Create Maps
+
+```{r}
+# Single Variable Map
+plot_usmap(
+  linewidth = 0.025,      #county line width
+  color = "white",        #county line color   
+  regions = "counties",   
+  data = seer,
+  values = "mort_ratio"
+) +
+  scale_fill_gradient(
+    name = "Black to White Mortality Rate", 
+    high = "darkblue",
+    low = "white"
+  ) +
+  labs(title = "Prostate Cancer Mortality Rates by County and Race (2014 -2022)") +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    text = element_text(size = 8))
+
+# Bivariate Map
+county_data <- us_map("counties")
+
+biv <- full_join(seer_brfss, county_data) %>%
+  drop_na()
+
+a <- bi_class(biv, x = mort_ratio, y = average_screening_unweighted, style = "quantile", dim = 3)
+a <- st_as_sf(a)
+
+# Map 
+map <- plot_usmap(
+  linewidth = 0.025, color = "black", regions = "counties") +
+  geom_sf(data = a, mapping = aes(fill = bi_class), color = "white", size = 0.01, show.legend = FALSE) +
+  bi_scale_fill(pal = "DkViolet", dim = 3) +
+  labs(
+    title = "Black vs. White Mortality Ratio and Average Screening Percent by US County"
+  ) +
+  biscale::bi_theme() +
+  theme(plot.title = element_text(size = 8))
+
+# Legend
+legend <- bi_legend(pal = "DkViolet",               
+                    dim = 3,
+                    xlab = "Higher Rate of Black to White Mortality ",
+                    ylab = "Higher Sceening Prevalence ",
+                    size = 1)
+
+legend <- legend + theme(axis.title = element_text(size = 3))    #adjusting the font size on legend, still a bit hard to read 
+
+# Map and Legend
+finalPlot <- ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +      #position of map
+  draw_plot(legend, 0.05, 0.1, .15, 1)    #position of legend
+print(finalPlot)
+```
+
+Delta Method
+
+```{r}
+# Delta Method for 2014-2022 Data
+df$white_count <- parse_number(df$white_count)
+df$white_pop <- parse_number(df$white_pop)
+df$black_count <- parse_number(df$black_count)
+df$black_pop <- parse_number(df$black_pop)
+
+df$white_variance <- df$white_count / df$white_pop ^ 2 * 1e5 ^ 2
+df$black_variance <- df$black_count / df$black_pop ^ 2 * 1e5 ^ 2
+
+df$variance_ratio <- 1/df$black_rate ^ 2 * df$white_variance + 1/df$white_rate ^ 2 * df$black_variance
+
+# Delta Method for Pre PSA DATA
+compare$white_variance_pre <- compare$white_count_pre / compare$white_pop_pre ^ 2 * 1e5 ^ 2
+compare$black_variance_pre <- compare$black_count_pre / compare$black_pop_pre ^ 2 * 1e5 ^ 2
+compare$variance_ratio_pre <- 1/compare$black_rate_pre ^ 2 * compare$white_variance_pre + 1/compare$white_rate_pre ^ 2 * compare$black_variance_pre
+```
+
+Scatter Plots
+
+```{r}
+# Regression w/Interaction Terms
+interaction_regression <- lm(
+  formula = mort_ratio ~ (average_screening_unweighted + EP_POV150 + EP_UNEMP + EP_NOHSDP + EP_UNINSUR)^2,
+  data = df,
+  weights = 1 / variance_ratio
+)
+
+# Main Model
+main_model_1 <- lm(mort_ratio ~ average_screening_unweighted, data = df, weights = 1 / variance_ratio)
+df$predicted_1 <- predict(main_model_1)
+
+# Scatter Plot Screening vs Mortality Ratio - Weighted Line
+ggplot(df, aes(x = average_screening_unweighted, y = mort_ratio, size = POPESTIMATE2019.x)) +
+  geom_point() +
+  geom_line(aes(y = predicted_1), color = "blue", size = 1) +
+  labs(x = "Average Screening %", y = "Black To White PCA Mortality Ratio (>50 y/o)", size = "County Population / 10,000") +
+  theme_minimal()
+
+# Scatter Plot Screening vs Mortality Ratio - Weighted Line and Facet Wrap by Population Size
+ggplot(df, aes(x = average_screening_unweighted, y = mort_ratio, size = POPESTIMATE2019.x)) +
+  geom_point() +
+  labs(
+    color = "Black to White Poverty Ratio",
+    x = "Average Screening %",
+    y = "Black To White Pca Mortality Ratio (>50 y/o)",
+    size = "County Population / 10,000",
+    title = "Scatter Plots Grouped By County Size (population)"
+  ) +
+  geom_line(aes(y = predicted_1), color = "blue", size = 1) +
+  facet_wrap(~ population_group) +
+  theme_minimal()
+
+# Pre PSA 1984-1989 Weighted Scatter Plot
+final_model_2 <- lm(mort_ratio_pre ~ average_screening_unweighted, data = compare, weights = 1 / variance_ratio_pre)
+
+compare$predicted <- predict(final_model_2)
+
+ggplot(compare, aes(x = average_screening_unweighted, y = mort_ratio_pre)) +
+  geom_point() +
+  geom_line(aes(y = predicted), color = "blue", size = 1) +
+  labs(x = "Average Screening %", y = "Black To White PCA Mortality Ratio (>50 y/o)", size = "County Population / 10,000") +
+  theme_minimal()
+```
+
